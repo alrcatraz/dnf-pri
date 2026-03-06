@@ -1,0 +1,181 @@
+#!/bin/bash
+
+# --- Global Configuration & Cleanup ---
+TEMP_DATA="/tmp/dnf_pri.tmp"
+# Ensure temp files are removed on exit or interruption
+trap "rm -f $TEMP_DATA ${TEMP_DATA}.final" EXIT
+
+# --- Utility Functions ---
+
+# Function: Display help information
+show_help()
+{
+    echo "dnf-pri is a tool to quickly lookup and set priority for dnf repositories installed"
+
+    local sub_cmd=$1
+    if [[ "$sub_cmd" == "set" ]]; then
+        echo "Usage: dnf-pri set <repo-id> <priority>"
+        echo "Description: Set priority for a specific repository (Requires root)"
+        echo "Example: sudo dnf-pri set fedora 10"
+    else
+        echo "Usage: dnf-pri [COMMAND] [OPTIONS]"
+        echo ""
+        echo "Commands:"
+        echo "  (default)             List all enabled repositories and their priorities"
+        echo "  set <id> <pri>        Set priority for a specific repository"
+        echo "  help                  Show this help message"
+        echo ""
+        echo "Options for listing:"
+        echo "  --sort [id|name|pri]  Sort the output table (default: id)"
+    fi
+}
+
+# Function: Draw adaptive progress bar on stderr
+draw_progress_bar()
+{
+    local current=$1
+    local total=$2
+    # Get terminal width, fallback to 80
+    local term_width=$(tput cols 2>/dev/null || echo 80)
+    # Calculate bar width (limit between 10 and 50 chars)
+    local bar_max_width=$(( term_width - 35 ))
+    [[ $bar_max_width -lt 10 ]] && bar_max_width=10
+    [[ $bar_max_width -gt 50 ]] && bar_max_width=50
+
+    local progress=$(( current * bar_max_width / total ))
+    local percent=$(( current * 100 / total ))
+    
+    local bar_filled=$(printf "%${progress}s" | tr ' ' '=')
+    local bar_empty=$(printf "%$(( bar_max_width - progress ))s")
+    
+    # \r returns cursor to start of line; >&2 ensures bar doesn't mess up piped output
+    printf "\rProgress: [%s>%s] %d%% (%d/%d)" "$bar_filled" "$bar_empty" "$percent" "$current" "$total" >&2
+}
+
+# --- Command Functions ---
+
+# Function: List and sort repositories
+cmd_list()
+{
+    local sort_rule=${1:-id}
+    
+    # Validate sort rule
+    if [[ ! "$sort_rule" =~ ^(id|name|pri)$ ]]; then
+        echo "Error: Invalid sort rule '$sort_rule'. Use 'id', 'name', or 'pri'." >&2
+        exit 1
+    fi
+
+    # Fetch enabled repos
+    local repos=($(dnf repolist -q --enabled | awk 'NR>0 {print $1}'))
+    local total_repos=${#repos[@]}
+
+    if [ "$total_repos" -eq 0 ]; then
+        echo "No enabled repositories found."
+        return
+    fi
+
+    echo "Fetching metadata and priorities..." >&2
+    > "$TEMP_DATA"
+
+    local count=0
+    for repo in "${repos[@]}"; do
+        ((count++))
+        draw_progress_bar "$count" "$total_repos"
+
+        # Dump config for specific repo
+        local conf=$(dnf config-manager --dump "$repo" 2>/dev/null)
+        if [ -z "$conf" ]; then continue; fi
+        
+        local name=$(echo "$conf" | grep "^name =" | cut -d'=' -f2- | xargs)
+        local pri=$(echo "$conf" | grep "^priority =" | cut -d'=' -f2- | xargs)
+        
+        # Default DNF priority is 99
+        [[ -z "$pri" ]] && pri=99
+        
+        echo "$repo|$name|$pri" >> "$TEMP_DATA"
+    done
+    echo -e "\n" >&2
+
+    # Prepare table with header and separator
+    echo "REPO_ID|REPO_NAME|PRIORITY" > "${TEMP_DATA}.final"
+    echo "-------|---------|--------" >> "${TEMP_DATA}.final"
+
+    # Sort logic
+    case $sort_rule in
+        name) sort -t'|' -k2 -f "$TEMP_DATA" >> "${TEMP_DATA}.final" ;;
+        pri)  sort -t'|' -k3 -n -s "$TEMP_DATA" >> "${TEMP_DATA}.final" ;;
+        id|*) sort -t'|' -k1 -f "$TEMP_DATA" >> "${TEMP_DATA}.final" ;;
+    esac
+
+    # Display formatted table
+    if command -v column &> /dev/null; then
+        column -t -s '|' "${TEMP_DATA}.final"
+    else
+        cat "${TEMP_DATA}.final" | tr '|' '\t'
+    fi
+}
+
+# Function: Set repository priority
+cmd_set()
+{
+    local target=$1
+    local priority=$2
+
+    if [[ -z "$target" || -z "$priority" ]]; then
+        show_help "set"
+        exit 1
+    fi
+
+    # Check if numeric
+    if [[ ! "$priority" =~ ^[0-9]+$ ]]; then
+        echo "Error: Priority must be a number." >&2
+        exit 1
+    fi
+
+    # Require root for config-manager --save
+    if [[ $EUID -ne 0 ]]; then
+        echo "Error: This command requires root privileges. Please use sudo." >&2
+        exit 1
+    fi
+
+    echo "Updating repository '$target' priority to $priority..."
+    dnf config-manager --save --setopt="${target}.priority=${priority}"
+    
+    if [ $? -eq 0 ]; then
+        echo "Success: Priority updated."
+    else
+        echo "Error: Failed to update priority. Check if repo ID is correct." >&2
+        exit 1
+    fi
+}
+
+# --- Main Entry Point (Router) ---
+
+case "$1" in
+    set)
+        shift
+        cmd_set "$@"
+        ;;
+    help|--help|-h)
+        shift
+        show_help "$@"
+        ;;
+    --sort)
+        # Handle: dnf-pri --sort name
+        cmd_list "$2"
+        ;;
+    "")
+        # Default: list by ID
+        cmd_list "id"
+        ;;
+    *)
+        # If the user provides a direct argument like 'pri' or 'name' without --sort
+        if [[ "$1" =~ ^(id|name|pri)$ ]]; then
+            cmd_list "$1"
+        else
+            echo "Error: Unknown command or option '$1'" >&2
+            show_help
+            exit 1
+        fi
+        ;;
+esac
