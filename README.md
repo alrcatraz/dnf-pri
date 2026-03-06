@@ -38,6 +38,14 @@ sudo dnf-pri set <repo-id> <priority>
 sudo dnf-pri set fedora 10
 ```
 
+## Installation
+
+This package is also avaliable in Copr. To enable the repository and install this package, run following command on `RHEL` / `RockyLinux` / `AlmaLinux` / `CentOS Stream` / `Fedora`:
+```bash
+sudo dnf copr enable alrcatraz/alrcatraz-utils
+sudo dnf install dnf-pri
+```
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See the [LICENSE](LICENSE) file for details.
