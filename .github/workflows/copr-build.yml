@@ -1,0 +1,36 @@
+name: Build and Deploy to Copr
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: dnf install -y rpm-build rpmdevtools copr-cli tar
+
+      - name: Create Source Tarball
+        run: |
+          mkdir -p dnf-pri-1.0.0
+          cp dnf-pri LICENSE README.md dnf-pri-1.0.0/
+          tar -czvf dnf-pri-1.0.0.tar.gz dnf-pri-1.0.0/
+          mkdir -p ~/rpmbuild/SOURCES/
+          cp dnf-pri-1.0.0.tar.gz ~/rpmbuild/SOURCES/
+
+      - name: Generate SRPM
+        run: rpmbuild -bs dnf-pri.spec
+
+      - name: Upload to Copr
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          mkdir -p ~/.config
+          echo "$COPR_CONFIG" > ~/.config/copr
+          copr-cli build alrcatraz-utils /github/home/rpmbuild/SRPMS/*.src.rpm

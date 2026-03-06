@@ -1,20 +1,43 @@
 # dnf-pri
-a tool to set and show priority of installed dnf repositories
 
-## How To Use
+`dnf-pri` is a lightweight command-line tool designed to manage and display the priorities of installed DNF repositories. It provides a clean, sorted table view of repositories and an easy way to set priority values.
 
+## Features
+
+- **List Repositories**: Display all enabled repositories with their ID, name, and current priority.
+- **Adaptive Progress Bar**: Shows real-time progress while fetching metadata.
+- **Flexible Sorting**: Sort the output table by Repository ID, Name, or Priority.
+- **Priority Management**: Set or update repository priorities directly (requires root privileges).
+
+## Prerequisites
+
+- **DNF**: The package manager.
+- **dnf-plugins-core**: Provides the `config-manager` command used by this tool.
+- **Bash**: The script is written in Shell.
+
+## Usage
+
+### Listing Repositories
+By default, the tool lists repositories sorted by ID:
+```bash
+dnf-pri
 ```
-dnf-pri [options]
+
+To sort by a specific field:
+```bash
+dnf-pri --sort id
+dnf-pri --sort name
+dnf-pri --sort pri
 ```
 
-### Options
+### Setting Priority
+To set a priority for a specific repository (requires `sudo`):
+```bash
+sudo dnf-pri set <repo-id> <priority>
+# Example:
+sudo dnf-pri set fedora 10
+```
 
-`--sort <sort_method>`
+## License
 
-Define how result table is organised. Possible `sort_method` are below:
-
-- **id**: Based on the order of ID of repositories
-- **name**: Based on the order or name of repositories
-- **pri**: Based on priority value set to repositories. Smaller value means higher priority
-
-If this option is not set individually, it will be `id` by default.
+This project is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later). See the [LICENSE](LICENSE) file for details.
