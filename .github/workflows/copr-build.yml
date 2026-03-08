@@ -11,17 +11,40 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Necessary to fetch tags for changelog generation
 
       - name: Install dependencies
         run: dnf install -y rpm-build rpmdevtools copr-cli tar
 
+      - name: Process Version and Update Spec
+        run: |
+          # Extract version from tag (e.g., v1.1.0 -> 1.1.0)
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+          # Dynamically update the Version field in spec file
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" dnf-pri.spec
+          
+          # Generate an automated changelog entry
+          DATE=$(date "+%a %b %d %Y")
+          # Use the tag message as the changelog description
+          MSG=$(git tag -l --format='%(contents:strip=2)' $GITHUB_REF_NAME | head -n 1)
+          if [ -z "$MSG" ]; then MSG="Automated build for version $VERSION"; fi
+          
+          # Insert new changelog entry at the top of the %changelog section
+          NEW_ENTRY="* $DATE Alrcatraz <alrcatraz@gmx.com> - $VERSION-1\n- $MSG\n"
+          sed -i "/%changelog/a $NEW_ENTRY" dnf-pri.spec
+
       - name: Create Source Tarball
         run: |
-          mkdir -p dnf-pri-1.0.0
-          cp dnf-pri LICENSE README.md dnf-pri-1.0.0/
-          tar -czvf dnf-pri-1.0.0.tar.gz dnf-pri-1.0.0/
+          VERSION=${{ env.VERSION }}
+          # Use dynamic version variable for directory and tarball names
+          mkdir -p dnf-pri-${VERSION}
+          cp dnf-pri LICENSE README.md dnf-pri-${VERSION}/
+          tar -czvf dnf-pri-${VERSION}.tar.gz dnf-pri-${VERSION}/
           mkdir -p ~/rpmbuild/SOURCES/
-          cp dnf-pri-1.0.0.tar.gz ~/rpmbuild/SOURCES/
+          cp dnf-pri-${VERSION}.tar.gz ~/rpmbuild/SOURCES/
 
       - name: Generate SRPM
         run: rpmbuild -bs dnf-pri.spec
@@ -32,4 +55,5 @@ jobs:
         run: |
           mkdir -p ~/.config
           echo "$COPR_CONFIG" > ~/.config/copr
+          # Use the default SRPM path in GitHub Actions container
           copr-cli build alrcatraz-utils /github/home/rpmbuild/SRPMS/*.src.rpm

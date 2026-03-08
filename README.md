@@ -30,13 +30,29 @@ dnf-pri --sort name
 dnf-pri --sort pri
 ```
 
-### Setting Priority
-To set a priority for a specific repository (requires `sudo`):
+### Setting Configurations (Requires `sodo`)
+The `set` command is a smart wrapper for `dnf config-manager`.
+
+#### Set Priority
 ```bash
 sudo dnf-pri set <repo-id> <priority>
 # Example:
 sudo dnf-pri set fedora 10
 ```
+
+#### Toggle Status
+```bash
+sudo dnf-pri set epel --enable
+sudo dnf-pri set epel --disable
+```
+
+#### Advanced Options
+```bash
+# Here are some examples
+sudo dnf-pri set epel --includepkgs "librime*"
+sudo dnf-pri set epel --excludepkgs "librime*"
+```
+
 
 ## Installation
 

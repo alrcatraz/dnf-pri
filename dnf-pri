@@ -16,8 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#!/bin/bash
-
 # --- Global Configuration & Cleanup ---
 TEMP_DATA="/tmp/dnf_pri.tmp"
 trap "rm -f $TEMP_DATA ${TEMP_DATA}.final" EXIT
@@ -42,9 +40,9 @@ show_help()
         echo "Usage: dnf-pri [COMMAND] [OPTIONS]"
         echo ""
         echo "Commands:"
-        echo "  (default)             List all enabled repositories and their priorities"
-        echo "  set <id> <pri>        Set priority for a specific repository"
-        echo "  help                  Show this help message"
+        echo "  (default)             List enabled repositories and their priorities"
+        echo "  set <id> <val/opt>    Modify repository priority or other options"
+        echo "  help [command]        Show this help or help for a specific command"
         echo ""
         echo "Options for listing:"
         echo "  --all                 Show all repositories (including disabled ones)"
@@ -124,38 +122,39 @@ cmd_list() {
     column -t -s '|' "${TEMP_DATA}.final" 2>/dev/null || cat "${TEMP_DATA}.final" | tr '|' '\t'
 }
 
-# Function: Set repository priority
-cmd_set()
-{
+cmd_set() {
     local target=$1
-    local priority=$2
+    shift
+    local first_arg=$1
 
-    if [[ -z "$target" || -z "$priority" ]]; then
-        show_help "set"
-        exit 1
-    fi
+    [[ -z "$target" || -z "$first_arg" ]] && { show_help "set"; exit 1; }
+    [[ $EUID -ne 0 ]] && { echo "Error: Please run as root (sudo)." >&2; exit 1; }
 
-    # Check if numeric
-    if [[ ! "$priority" =~ ^[0-9]+$ ]]; then
-        echo "Error: Priority must be a number." >&2
-        exit 1
-    fi
-
-    # Require root for config-manager --save
-    if [[ $EUID -ne 0 ]]; then
-        echo "Error: This command requires root privileges. Please use sudo." >&2
-        exit 1
-    fi
-
-    echo "Updating repository '$target' priority to $priority..."
-    dnf config-manager --save --setopt="${target}.priority=${priority}"
-    
-    if [ $? -eq 0 ]; then
-        echo "Success: Priority updated."
+    # Logic: If first_arg is a number, set priority. Otherwise, treat as flags.
+    if [[ "$first_arg" =~ ^[0-9]+$ ]]; then
+        echo "Setting priority of '$target' to $first_arg..."
+        dnf config-manager --save --setopt="${target}.priority=${first_arg}"
     else
-        echo "Error: Failed to update priority. Check if repo ID is correct." >&2
-        exit 1
+        # Pass flags directly to config-manager
+        # e.g., set epel --disable OR set epel --includepkgs librime
+        echo "Updating '$target' with options: $@"
+        
+        # Handle special cases like --enable / --disable which are direct flags
+        if [[ "$first_arg" == "--enable" ]]; then
+            dnf config-manager --save --set-enabled "$target"
+        elif [[ "$first_arg" == "--disable" ]]; then
+            dnf config-manager --save --set-disabled "$target"
+        else
+            # For --setopt style: e.g. dnf-pri set epel --includepkgs rime
+            # We convert it to: dnf config-manager --save --setopt=epel.includepkgs=rime
+            local opt_name=$(echo "$first_arg" | sed 's/^--//')
+            shift
+            local opt_val="$1"
+            dnf config-manager --save --setopt="${target}.${opt_name}=${opt_val}"
+        fi
     fi
+
+    [[ $? -eq 0 ]] && echo "Success." || echo "Error: Failed to update."
 }
 
 # --- Main Router ---
