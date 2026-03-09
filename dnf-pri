@@ -20,6 +20,13 @@
 TEMP_DATA="/tmp/dnf_pri.tmp"
 trap "rm -f $TEMP_DATA ${TEMP_DATA}.final" EXIT
 
+# --- Detect DNF Version ---
+if dnf --version 2>/dev/null | grep -iq "dnf5"; then
+    IS_DNF5=1
+else
+    IS_DNF5=0
+fi
+
 # --- Utility Functions ---
 
 # Function: Display help information
@@ -52,6 +59,7 @@ show_help()
 
 draw_progress_bar() {
     local current=$1 total=$2
+   
     local term_width=$(tput cols 2>/dev/null || echo 80)
     local bar_max_width=$(( term_width - 45 ))
     [[ $bar_max_width -lt 10 ]] && bar_max_width=10
@@ -69,24 +77,41 @@ draw_progress_bar() {
 
 cmd_list() {
     local sort_rule="id"
-    local scope="--enabled"
+    local scope=""
+    local dnf4_scope="--enabled"
     
     # Simple argument parsing for list
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-            --all) scope="--all" ;;
+            --all) scope="--all"; dnf4_scope="--all" ;;
             --sort) sort_rule="$2"; shift ;;
             id|name|pri) sort_rule="$1" ;; # legacy support
         esac
         shift
     done
 
-    local repos=($(dnf repolist -q $scope | awk 'NR>0 {print $1}'))
+    # Extract repositories safely depending on the DNF version
+    if [[ "$IS_DNF5" -eq 1 ]]; then
+        # Use awk to start grabbing from the line AFTER the header "repo id" or "仓库 ID"
+        local repos=($(dnf repo list $scope 2>/dev/null | awk '
+            BEGIN { start=0 }
+            /^repo id/ || /^仓库 ID/ { start=1; next }
+            start==1 && NF>0 { print $1 }
+        '))
+        
+        # Fallback just in case headers are entirely different in other languages
+        if [[ ${#repos[@]} -eq 0 ]]; then
+            local repos=($(dnf repo list $scope 2>/dev/null | awk 'NR>1 {print $1}'))
+        fi
+    else
+        local repos=($(dnf repolist -q $dnf4_scope 2>/dev/null | awk 'NR>0 {print $1}'))
+    fi
+    
     local total_repos=${#repos[@]}
 
     [[ "$total_repos" -eq 0 ]] && { echo "No repositories found."; return; }
 
-    echo "Fetching metadata (Scope: $scope, Sort: $sort_rule)..." >&2
+    echo "Fetching metadata (Scope: ${scope:-"--enabled"}, Sort: $sort_rule)..." >&2
     > "$TEMP_DATA"
 
     local count=0
@@ -94,7 +119,13 @@ cmd_list() {
         ((count++))
         draw_progress_bar "$count" "$total_repos"
 
-        local conf=$(dnf config-manager --dump "$repo" 2>/dev/null)
+        if [[ "$IS_DNF5" -eq 1 ]]; then
+            # The correct option for DNF5 is --dump-repo-config 
+            local conf=$(dnf --dump-repo-config="$repo" 2>/dev/null)
+        else
+            local conf=$(dnf config-manager --dump "$repo" 2>/dev/null)
+        fi
+        
         [[ -z "$conf" ]] && continue
         
         local name=$(echo "$conf" | grep "^name =" | cut -d'=' -f2- | xargs)
@@ -133,24 +164,40 @@ cmd_set() {
     # Logic: If first_arg is a number, set priority. Otherwise, treat as flags.
     if [[ "$first_arg" =~ ^[0-9]+$ ]]; then
         echo "Setting priority of '$target' to $first_arg..."
-        dnf config-manager --save --setopt="${target}.priority=${first_arg}"
+        if [[ "$IS_DNF5" -eq 1 ]]; then
+            dnf config-manager setopt "${target}.priority=${first_arg}"
+        else
+            dnf config-manager --save --setopt="${target}.priority=${first_arg}"
+        fi
     else
-        # Pass flags directly to config-manager
-        # e.g., set epel --disable OR set epel --includepkgs librime
+        # Pass flags to config-manager based on version
         echo "Updating '$target' with options: $@"
         
-        # Handle special cases like --enable / --disable which are direct flags
+        # Handle special cases like --enable / --disable 
         if [[ "$first_arg" == "--enable" ]]; then
-            dnf config-manager --save --set-enabled "$target"
+            if [[ "$IS_DNF5" -eq 1 ]]; then
+                dnf config-manager setopt "${target}.enabled=1"
+            else
+                dnf config-manager --save --set-enabled "$target"
+            fi
         elif [[ "$first_arg" == "--disable" ]]; then
-            dnf config-manager --save --set-disabled "$target"
+            if [[ "$IS_DNF5" -eq 1 ]]; then
+                dnf config-manager setopt "${target}.enabled=0"
+            else
+                dnf config-manager --save --set-disabled "$target"
+            fi
         else
             # For --setopt style: e.g. dnf-pri set epel --includepkgs rime
-            # We convert it to: dnf config-manager --save --setopt=epel.includepkgs=rime
             local opt_name=$(echo "$first_arg" | sed 's/^--//')
             shift
             local opt_val="$1"
-            dnf config-manager --save --setopt="${target}.${opt_name}=${opt_val}"
+            if [[ "$IS_DNF5" -eq 1 ]]; then
+                # New DNF5 Syntax: setopt <repoid>.<option>=<value>
+                dnf config-manager setopt "${target}.${opt_name}=${opt_val}"
+            else
+                # Legacy DNF4 Syntax
+                dnf config-manager --save --setopt="${target}.${opt_name}=${opt_val}"
+            fi
         fi
     fi
 
