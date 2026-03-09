@@ -8,11 +8,6 @@ actions:
 
 jobs:
   - job: copr_build
-    trigger: pull_request
-    owner: alrcatraz
-    project: alrcatraz-utils
-
-  - job: copr_build
     trigger: release
     owner: alrcatraz
     project: alrcatraz-utils
