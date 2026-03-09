@@ -3,8 +3,8 @@ specfile_path: dnf-pri.spec
 upstream_package_name: dnf-pri
 downstream_package_name: dnf-pri
 
-actions:
-  get-current-version: "grep '^Version:' dnf-pri.spec | awk '{print $2}'"
+# actions:
+#   get-current-version: "grep '^Version:' dnf-pri.spec | awk '{print $2}'"
 
 jobs:
   - job: copr_build
