@@ -1,6 +1,6 @@
 # dnf-pri
 
-`dnf-pri` is a lightweight command-line tool designed to manage and display the priorities of installed DNF repositories. It provides a clean, sorted table view of repositories and an easy way to set priority values.
+`dnf-pri` is a lightweight command-line tool designed to manage and display the priorities of installed DNF/DNF5 repositories. It provides a clean, sorted table view of repositories and an easy way to set priority values.x
 
 ## Features
 
